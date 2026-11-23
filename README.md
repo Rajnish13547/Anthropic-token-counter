@@ -2,6 +2,8 @@
 
 See how many tokens Claude uses for any piece of text, using Anthropic's official [Token Counting API](https://docs.anthropic.com/en/docs/build-with-claude/token-counting).
 
+Live app: https://anthropic-token-counter.onrender.com
+
 Source: https://github.com/Rajnish13547/Anthropic-token-counter
 
 ## Using the app
