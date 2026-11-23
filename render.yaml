@@ -1,0 +1,8 @@
+# Render Blueprint (Web Service). No secrets: each user enters their own Anthropic key in the browser.
+services:
+  - type: web
+    name: anthropic-token-counter
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
