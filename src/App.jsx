@@ -4,7 +4,7 @@ import Footer from './components/Footer.jsx'
 import CustomTextCard from './components/CustomTextCard.jsx'
 import SampleRow from './components/SampleRow.jsx'
 import { ApiError, countTokens, isFatal } from './lib/anthropic.js'
-import { DOCS_URL } from './lib/links.js'
+import { DOCS_URL, REPO_URL } from './lib/links.js'
 import { DEFAULT_MODEL, MODELS } from './lib/models.js'
 import { runPool } from './lib/pool.js'
 import { SAMPLES } from './lib/samples.js'
@@ -88,6 +88,15 @@ export default function App() {
             Token Counting API
           </a>
           .
+          {REPO_URL && (
+            <>
+              {' '}
+              <a href={REPO_URL} target="_blank" rel="noopener noreferrer">
+                GitHub repository
+              </a>
+              .
+            </>
+          )}
         </p>
       </header>
 
