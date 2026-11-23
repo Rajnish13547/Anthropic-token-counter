@@ -1,5 +1,5 @@
 {
-  "name": "anthropic-token-counter",
+  "name": "multi-llm-token-counter",
   "private": true,
   "version": "1.0.0",
   "type": "module",

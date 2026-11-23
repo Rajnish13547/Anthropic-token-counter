@@ -1,20 +1,20 @@
 import { useRef, useState } from 'react'
 import { extractKey, readKeyFile } from '../lib/keyFile.js'
 
-const KEYS_URL = 'https://console.anthropic.com/settings/keys'
-
-export default function ApiKeyInput({ value, onChange, disabled }) {
+export default function ProviderPanel({ provider, value, onChange, model, onModelChange, disabled }) {
   const [visible, setVisible] = useState(false)
   const [notice, setNotice] = useState(null) // { type: 'ok' | 'error', text }
   const fileRef = useRef(null)
+  const id = provider.id
   const trimmed = value.trim()
-  const warn = trimmed && !trimmed.startsWith('sk-ant-')
+  const added = trimmed.length > 0
+  const mismatch = added && !provider.looksLike(trimmed)
 
   async function handleFile(e) {
     const file = e.target.files?.[0]
-    e.target.value = '' // let the same file be picked again; we keep no reference to it
+    e.target.value = '' // allow picking the same file again; no reference is kept
     if (!file) return
-    const result = await readKeyFile(file)
+    const result = await readKeyFile(file, provider.id)
     if ('key' in result) {
       onChange(result.key)
       setVisible(false) // a key loaded from a file always starts hidden
@@ -24,9 +24,9 @@ export default function ApiKeyInput({ value, onChange, disabled }) {
     }
   }
 
-  // Pasting a whole "ANTHROPIC_API_KEY=sk-ant-..." line (or quoted value) keeps just the key.
+  // Pasting a whole "NAME=sk-..." line keeps just the key.
   function handlePaste(e) {
-    const key = extractKey(e.clipboardData.getData('text'))
+    const key = extractKey(e.clipboardData.getData('text'), provider.id)
     if (!key) return
     e.preventDefault()
     onChange(key)
@@ -34,10 +34,20 @@ export default function ApiKeyInput({ value, onChange, disabled }) {
   }
 
   return (
-    <section className="card" aria-labelledby="key-heading">
-      <h2 id="key-heading">Your Anthropic API key</h2>
+    <section className="card provider" aria-labelledby={`${id}-heading`}>
+      <div className="provider-head">
+        <h3 id={`${id}-heading`}>{provider.label}</h3>
+        <span className={`pill ${added && !mismatch ? 'ok' : ''}`}>
+          {!added ? 'No key' : mismatch ? 'Check key' : 'Key added'}
+        </span>
+      </div>
+
+      <label className="field-label" htmlFor={`${id}-key`}>
+        API key
+      </label>
       <div className="key-row">
         <input
+          id={`${id}-key`}
           type={visible ? 'text' : 'password'}
           value={value}
           onChange={(e) => {
@@ -45,17 +55,15 @@ export default function ApiKeyInput({ value, onChange, disabled }) {
             setNotice(null)
           }}
           onPaste={handlePaste}
-          placeholder="sk-ant-..."
-          // Keep the key out of browser autofill/spellcheck/password-manager storage.
+          placeholder={provider.keyPlaceholder}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
           disabled={disabled}
-          aria-label="Anthropic API key"
-          aria-describedby="key-help"
+          aria-invalid={mismatch ? 'true' : undefined}
         />
-        <button type="button" className="btn secondary" onClick={() => setVisible((v) => !v)} aria-pressed={visible}>
+        <button type="button" className="btn secondary" onClick={() => setVisible((v) => !v)} aria-pressed={visible} aria-label={`${visible ? 'Hide' : 'Show'} ${provider.label} key`}>
           {visible ? 'Hide' : 'Show'}
         </button>
       </div>
@@ -69,7 +77,7 @@ export default function ApiKeyInput({ value, onChange, disabled }) {
           accept=".txt,.env,.key,text/plain"
           onChange={handleFile}
           hidden
-          aria-label="Upload a file containing your API key"
+          aria-label={`Upload a file containing your ${provider.label} key`}
         />
         <button
           type="button"
@@ -78,9 +86,9 @@ export default function ApiKeyInput({ value, onChange, disabled }) {
             onChange('')
             setNotice(null)
           }}
-          disabled={disabled || !value}
+          disabled={disabled || !added}
         >
-          Clear key
+          Clear
         </button>
       </div>
 
@@ -89,22 +97,27 @@ export default function ApiKeyInput({ value, onChange, disabled }) {
           {notice.text}
         </p>
       )}
-      {warn && (
+      {mismatch && (
         <p className="help warn" role="status">
-          This doesn&rsquo;t look like an Anthropic key (they start with <code>sk-ant-</code>).
+          This doesn&rsquo;t look like a {provider.label} key (they start with <code>{provider.keyPrefixHint}</code>).
         </p>
       )}
-      <p id="key-help" className="help">
-        Your key stays in this browser tab&rsquo;s memory and is sent only to <code>api.anthropic.com</code>. There is
-        no server in between, and it is never stored or logged. It disappears when you refresh or close the tab.
-      </p>
+
+      <label className="field-label" htmlFor={`${id}-model`}>
+        Model
+      </label>
+      <select id={`${id}-model`} value={model} onChange={(e) => onModelChange(e.target.value)} disabled={disabled}>
+        {provider.models.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.label}
+          </option>
+        ))}
+      </select>
+
       <p className="help">
-        <strong>Stay safe:</strong> use a dedicated key with a low spend limit, don&rsquo;t use a shared computer, and
-        revoke the key when you&rsquo;re done in the{' '}
-        <a href={KEYS_URL} target="_blank" rel="noopener noreferrer">
-          Anthropic Console
+        <a href={provider.keysUrl} target="_blank" rel="noopener noreferrer">
+          Get or manage keys
         </a>
-        .
       </p>
     </section>
   )

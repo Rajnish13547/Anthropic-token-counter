@@ -1,93 +1,108 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import ApiKeyInput from './components/ApiKeyInput.jsx'
-import Footer from './components/Footer.jsx'
+import { useEffect, useRef, useState } from 'react'
+import CompareTable from './components/CompareTable.jsx'
 import CustomTextCard from './components/CustomTextCard.jsx'
-import SampleRow from './components/SampleRow.jsx'
-import { ApiError, countTokens, isFatal } from './lib/anthropic.js'
-import { DOCS_URL, REPO_URL } from './lib/links.js'
-import { DEFAULT_MODEL, MODELS } from './lib/models.js'
-import { runPool } from './lib/pool.js'
+import Footer from './components/Footer.jsx'
+import ProviderPanel from './components/ProviderPanel.jsx'
+import { MAX_CUSTOM_CHARS } from './lib/limits.js'
+import { REPO_URL } from './lib/links.js'
+import { PROVIDERS, defaultModelId } from './lib/providers.js'
+import { runJobs } from './lib/runner.js'
 import { SAMPLES } from './lib/samples.js'
 
-const CONCURRENCY = 3
+const CUSTOM = 'custom'
+const CONCURRENCY = 4
+
+const fromProviders = (fn) => Object.fromEntries(PROVIDERS.map((p) => [p.id, fn(p)]))
+const mapCells = (results, fn) =>
+  Object.fromEntries(
+    Object.entries(results).map(([rowId, cells]) => [
+      rowId,
+      Object.fromEntries(Object.entries(cells).map(([pid, v]) => [pid, fn(v)])),
+    ]),
+  )
+const withoutRow = (results, rowId) => {
+  const { [rowId]: _removed, ...rest } = results
+  return rest
+}
 
 export default function App() {
-  const [model, setModel] = useState(DEFAULT_MODEL)
-  const [apiKey, setApiKey] = useState('') // memory only: never persisted
-  const [results, setResults] = useState({})
+  const [keys, setKeys] = useState(() => fromProviders(() => '')) // memory only
+  const [models, setModels] = useState(() => fromProviders(defaultModelId))
+  const [customText, setCustomText] = useState('')
+  const [results, setResults] = useState({}) // { [rowId]: { [providerId]: { status, tokens | error } } }
   const [running, setRunning] = useState(false)
   const [banner, setBanner] = useState(null)
   const abortRef = useRef(null)
 
-  // Cancel any in-flight requests if the component unmounts.
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(() => () => abortRef.current?.abort(), []) // cancel on unmount
 
+  const configured = PROVIDERS.filter((p) => keys[p.id].trim())
+  const activeIds = configured.map((p) => p.id)
+  const modelLabels = fromProviders((p) => p.models.find((m) => m.id === models[p.id])?.label ?? models[p.id])
+  const setCell = (rowId, pid, value) =>
+    setResults((r) => ({ ...r, [rowId]: { ...r[rowId], [pid]: value } }))
 
-  const setResult = (id, value) => setResults((r) => ({ ...r, [id]: value }))
+  function changeKey(pid, value) {
+    setKeys((k) => ({ ...k, [pid]: value }))
+  }
 
-  const total = useMemo(
-    () => Object.values(results).reduce((sum, r) => sum + (r.status === 'done' ? r.tokens : 0), 0),
-    [results],
-  )
-  const doneCount = Object.values(results).filter((r) => r.status === 'done').length
+  function changeModel(pid, model) {
+    setModels((m) => ({ ...m, [pid]: model }))
+    // Results for this provider were produced by the previous model, so drop them.
+    setResults((r) =>
+      Object.fromEntries(
+        Object.entries(r).map(([rowId, cells]) => {
+          const { [pid]: _gone, ...rest } = cells
+          return [rowId, rest]
+        }),
+      ),
+    )
+  }
 
-  async function handleCount() {
-    const key = apiKey.trim()
-    if (!key) return setBanner({ type: 'error', text: 'Enter your Anthropic API key first.' })
+  async function countRows(rows) {
+    const jobs = rows.flatMap((row) =>
+      configured.map((p) => ({
+        rowId: row.id,
+        text: row.text,
+        providerId: p.id,
+        apiKey: keys[p.id].trim(),
+        model: models[p.id],
+      })),
+    )
+    if (configured.length === 0) {
+      setBanner({ type: 'error', text: 'Enter at least one API key above, then try again.' })
+      return
+    }
 
     const controller = new AbortController()
     abortRef.current = controller
     setBanner(null)
     setRunning(true)
-    setResults(Object.fromEntries(SAMPLES.map((s) => [s.id, { status: 'loading' }])))
+    setResults((r) => {
+      const next = { ...r }
+      for (const j of jobs) next[j.rowId] = { ...next[j.rowId], [j.providerId]: { status: 'loading' } }
+      return next
+    })
 
-    let fatal = null
-    await runPool(
-      SAMPLES,
-      CONCURRENCY,
-      async (sample) => {
-        try {
-          const tokens = await countTokens({ apiKey: key, text: sample.text, model, signal: controller.signal })
-          setResult(sample.id, { status: 'done', tokens })
-        } catch (err) {
-          if (isFatal(err)) {
-            fatal ??= err
-            controller.abort()
-          }
-          if (err instanceof ApiError && err.kind === 'aborted') return
-          setResult(sample.id, {
-            status: 'error',
-            error: err instanceof ApiError ? err.message : 'Something went wrong. Please try again.',
-          })
-        }
-      },
-      controller.signal,
-    )
+    await runJobs({ jobs, concurrency: CONCURRENCY, signal: controller.signal, onResult: setCell })
 
-    // Anything that never ran (cancelled / stopped after a fatal error) goes back to idle.
-    setResults((r) =>
-      Object.fromEntries(Object.entries(r).map(([id, v]) => [id, v.status === 'loading' ? { status: 'idle' } : v])),
-    )
-    if (fatal && fatal.kind !== 'aborted') setBanner({ type: 'error', text: fatal.message })
-    else if (controller.signal.aborted) setBanner({ type: 'info', text: 'Counting cancelled.' })
+    // Anything that never ran (cancelled) goes back to idle.
+    setResults((r) => mapCells(r, (v) => (v.status === 'loading' ? { status: 'idle' } : v)))
+    if (controller.signal.aborted) setBanner({ type: 'info', text: 'Counting cancelled.' })
     setRunning(false)
     abortRef.current = null
   }
 
+  const canCountCustom = customText.trim().length > 0 && customText.length <= MAX_CUSTOM_CHARS && !running
+  const hasCustomResults = Boolean(results[CUSTOM])
+
   return (
     <main className="container">
       <header>
-        <h1>Anthropic Token Counter</h1>
+        <h1>Multi-LLM Token Counter</h1>
         <p className="subtitle">
-          See how many tokens Claude uses for different kinds of text, using Anthropic&rsquo;s official{' '}
-          <a
-            href={DOCS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Token Counting API
-          </a>
-          .
+          Compare how many tokens Claude, GPT and Gemini use for the same text, using each provider&rsquo;s official
+          token counting API.
           {REPO_URL && (
             <>
               {' '}
@@ -100,60 +115,87 @@ export default function App() {
         </p>
       </header>
 
-      <ApiKeyInput value={apiKey} onChange={setApiKey} disabled={running} />
-
-      <div className="toolbar">
-        <label className="model">
-          <span>Model</span>
-          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={running}>
-            {MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <CustomTextCard apiKey={apiKey} model={model} />
-
-      <section className="card" aria-labelledby="samples-heading">
-        <h2 id="samples-heading">Predefined samples</h2>
-
-        <ul className="samples">
-          {SAMPLES.map((s) => (
-            <SampleRow key={s.id} sample={s} result={results[s.id]} />
+      <section aria-labelledby="keys-heading">
+        <h2 id="keys-heading" className="section-title">
+          1. Enter your API keys
+        </h2>
+        <p className="section-note">
+          Add a key for each provider you want to compare. Providers without a key show a dash in the results. Keys stay in
+          this tab&rsquo;s memory and are sent only to that provider.
+        </p>
+        <div className="providers">
+          {PROVIDERS.map((p) => (
+            <ProviderPanel
+              key={p.id}
+              provider={p}
+              value={keys[p.id]}
+              onChange={(v) => changeKey(p.id, v)}
+              model={models[p.id]}
+              onModelChange={(m) => changeModel(p.id, m)}
+              disabled={running}
+            />
           ))}
-        </ul>
-
-        <div className="actions">
-          {running ? (
-            <button type="button" className="btn secondary" onClick={() => abortRef.current?.abort()}>
-              Cancel
-            </button>
-          ) : (
-            <button type="button" className="btn primary" onClick={handleCount} disabled={!apiKey.trim()}>
-              Count Tokens
-            </button>
-          )}
-          {doneCount > 0 && (
-            <span className="total">
-              Total: <strong>{total.toLocaleString()}</strong> tokens across {doneCount} sample
-              {doneCount === 1 ? '' : 's'}
-            </span>
-          )}
         </div>
+      </section>
+
+      <section aria-labelledby="count-heading">
+        <h2 id="count-heading" className="section-title">
+          2. Count tokens
+        </h2>
 
         {banner && (
           <div className={`banner ${banner.type}`} role={banner.type === 'error' ? 'alert' : 'status'}>
             {banner.text}
           </div>
         )}
-        <p className="help">
-          Counts reflect each sample sent as a single user message, so they include a few tokens of
-          message-format overhead.
-        </p>
+
+        <CustomTextCard
+          text={customText}
+          onTextChange={(v) => {
+            setCustomText(v)
+            if (!running) setResults((r) => withoutRow(r, CUSTOM))
+          }}
+          onCount={() => countRows([{ id: CUSTOM, text: customText }])}
+          onClear={() => {
+            setCustomText('')
+            setResults((r) => withoutRow(r, CUSTOM))
+          }}
+          canCount={canCountCustom}
+          hasResults={hasCustomResults}
+          providers={PROVIDERS}
+          activeIds={activeIds}
+          modelLabels={modelLabels}
+          results={results}
+          running={running}
+        />
+
+        <section className="card" aria-labelledby="samples-heading">
+          <div className="card-head">
+            <h3 id="samples-heading">Predefined samples</h3>
+            {running ? (
+              <button type="button" className="btn secondary" onClick={() => abortRef.current?.abort()}>
+                Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => countRows(SAMPLES.map((s) => ({ id: s.id, text: s.text })))}
+              >
+                Count Tokens
+              </button>
+            )}
+          </div>
+          <CompareTable
+            rows={SAMPLES.map((s) => ({ id: s.id, title: s.label, text: s.text }))}
+            providers={PROVIDERS}
+            activeIds={activeIds}
+            modelLabels={modelLabels}
+            results={results}
+          />
+        </section>
       </section>
+
       <Footer />
     </main>
   )

@@ -1,13 +1,17 @@
-// Shared security policy. The only external origin the page may talk to is
-// Anthropic's API, so even a compromised script can't send a key anywhere else.
-export const ANTHROPIC_ORIGIN = 'https://api.anthropic.com'
+// Shared security policy. The page may connect only to the three token-counting
+// APIs, so even a compromised script can't send a key anywhere else.
+export const PROVIDER_ORIGINS = [
+  'https://api.anthropic.com',
+  'https://api.openai.com',
+  'https://generativelanguage.googleapis.com',
+]
 
 const directives = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data:",
-  `connect-src ${ANTHROPIC_ORIGIN}`,
+  `connect-src ${PROVIDER_ORIGINS.join(' ')}`,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",

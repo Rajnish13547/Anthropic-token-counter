@@ -25,7 +25,7 @@ describe('static server', () => {
     expect(await res.text()).toContain('<h1>app</h1>')
     const csp = res.headers.get('content-security-policy')
     expect(csp).toBe(cspHeader)
-    expect(csp).toContain('connect-src https://api.anthropic.com;')
+    expect(csp).toContain('connect-src https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com;')
     expect(csp).toContain("frame-ancestors 'none'")
     expect(res.headers.get('x-content-type-options')).toBe('nosniff')
     expect(res.headers.get('strict-transport-security')).toMatch(/max-age/)
