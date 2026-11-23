@@ -99,10 +99,3 @@ server/
   static.js                     tiny static file server for dist/ (npm start)
   security.js                   CSP + security headers (Anthropic-only connect-src)
 ```
-
-## Submission
-
-1. Confirm `npm install`, `npm test` and `npm run build` succeed on a clean checkout.
-2. Confirm no key is in the code or git history and that `.env`, `node_modules/` and `dist/` are not committed.
-3. Submit the GitHub repository link and the live Render URL.
-4. **Deadline:** _[to be filled in; the assignment did not specify one]_
